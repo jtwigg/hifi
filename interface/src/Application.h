@@ -263,6 +263,7 @@ private:
     void voxelSelectionUpdatePlaceNewVoxel();
     void voxelSelectionPlaceNewVoxel();
 
+
     QMainWindow* _window;
     QGLWidget* _glWidget;
     
@@ -354,6 +355,8 @@ private:
     //Voxel that was downclicked upon.
     VoxelDetail _SelectedVoxel;
     bool _isVoxelSelected;
+    bool _isVoxelSelectedBeingModified;
+    eQuadrant _quadrant;
     int _ClickedMouseX;
     int _ClickedMouseY;
     bool _PlacingNewVoxel;

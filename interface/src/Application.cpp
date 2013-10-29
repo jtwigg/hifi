@@ -1064,18 +1064,80 @@ void Application::mouseMoveEvent(QMouseEvent* event) {
     }
 }
 
+const int  SELECTED_VOXEL_MOUSE_TRANSLATION = 5;
+
 void Application::voxelSelectionMouseMove()
 {
+    if(_isVoxelSelected)
+    {
+        if(!_isVoxelSelectedBeingModified)
+        {
+            if((abs( _mouseX - _ClickedMouseX)  > SELECTED_VOXEL_MOUSE_TRANSLATION) ||
+               (abs( _mouseY - _ClickedMouseY)  > SELECTED_VOXEL_MOUSE_TRANSLATION))
+            {
+                
+                if(abs( _mouseX - _ClickedMouseX) >= abs( _mouseY - _ClickedMouseY))
+                {
+                    if(_ClickedMouseX > _mouseX )
+                    {
+                        _quadrant = QUADRANT_LEFT;
+                        voxelSelectionBeginPlaceNewVoxel();
+                    }
+                    else
+                    {
+                        _quadrant = QUADRANT_RIGHT;
+                    }
+                }
+                else
+                {
+                    if(_ClickedMouseY > _mouseY)
+                    {
+                        _quadrant = QUADRANT_UP;
+                    }
+                    else
+                    {
+                        _quadrant = QUADRANT_DOWN;
+                    }
+                }
+            }
+        }
+        
+        if(_isVoxelSelectedBeingModified)
+        {
+            switch (_quadrant) {
+                case QUADRANT_LEFT:
+                {
+                    voxelSelectionBeginPlaceNewVoxel();
+                    break;
+                }
+                    
+                default:
+                    break;
+            }
+            
+        }
+    }
+    
+}
+void Application::voxelSelectionUpdatePlaceNewVoxel()
+{
+    
+    
+    
+}
 
 
-
+void Application::voxelSelectionBeginPlaceNewVoxel()
+{
+    
+    
+    
 }
 
 const bool MAKE_SOUND_ON_VOXEL_HOVER = false;
 const bool MAKE_SOUND_ON_VOXEL_CLICK = true;
 const float HOVER_VOXEL_FREQUENCY = 7040.f;
 const float HOVER_VOXEL_DECAY = 0.999f;
-const int  SELECTED_VOXEL_MOUSE_TRANSLATION = 5;
 
 void Application::mousePressEvent(QMouseEvent* event) {
     if (activeWindow() == _window) {
@@ -1170,39 +1232,9 @@ void Application::mouseReleaseEvent(QMouseEvent* event) {
 
 void Application::voxelSelectionMouseUp()
 {
-    enum
-    {
-        QUADRANT_LEFT,
-        QUADRANT_RIGHT,
-        QUADRANT_UP,
-        QUADRANT_DOWN
-    };
     
-    int quadrant = -1;
-    if(abs( _mouseX - _ClickedMouseX) >= abs( _mouseY - _ClickedMouseY))
-    {
-        if(_ClickedMouseX > _mouseX )
-        {
-            quadrant = QUADRANT_LEFT;
-        }
-        else
-        {
-            quadrant = QUADRANT_RIGHT;
-        }
-    }
-    else
-    {
-        if(_ClickedMouseY > _mouseY)
-        {
-            quadrant = QUADRANT_UP;
-        }
-        else
-        {
-            quadrant = QUADRANT_DOWN;
-        }
-    }
-    
-    switch (quadrant) {
+  
+    switch (_quadrant) {
         case QUADRANT_UP:
             
             break;
@@ -1229,11 +1261,6 @@ void Application::voxelSelectionMouseUp()
     
 }
 
-void Application::voxelSelectionBeginPlaceNewVoxel()
-{
-     
-     
-}
      
 void Application::touchUpdateEvent(QTouchEvent* event) {
     bool validTouch = false;

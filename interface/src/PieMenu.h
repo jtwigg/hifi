@@ -16,6 +16,14 @@
 
 #include <QImage>
 
+enum eQuadrant
+{
+    QUADRANT_LEFT,
+    QUADRANT_RIGHT,
+    QUADRANT_UP,
+    QUADRANT_DOWN
+};
+
 class QAction;
 
 class PieMenu {
