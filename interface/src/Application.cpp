@@ -1041,6 +1041,13 @@ void Application::mouseMoveEvent(QMouseEvent* event) {
     if (activeWindow() == _window) {
         _mouseX = event->x();
         _mouseY = event->y();
+        
+        if(_isVoxelSelected)
+        {
+            voxelSelectionMouseMove();
+            
+            return;
+        }
 
         // detect drag
         glm::vec3 mouseVoxelPos(_mouseVoxel.x, _mouseVoxel.y, _mouseVoxel.z);
@@ -1057,10 +1064,18 @@ void Application::mouseMoveEvent(QMouseEvent* event) {
     }
 }
 
+void Application::voxelSelectionMouseMove()
+{
+
+
+
+}
+
 const bool MAKE_SOUND_ON_VOXEL_HOVER = false;
 const bool MAKE_SOUND_ON_VOXEL_CLICK = true;
 const float HOVER_VOXEL_FREQUENCY = 7040.f;
 const float HOVER_VOXEL_DECAY = 0.999f;
+const int  SELECTED_VOXEL_MOUSE_TRANSLATION = 5;
 
 void Application::mousePressEvent(QMouseEvent* event) {
     if (activeWindow() == _window) {
@@ -1109,15 +1124,17 @@ void Application::mousePressEvent(QMouseEvent* event) {
                 _audio.startCollisionSound(1.0, frequency, 0.0, HOVER_VOXEL_DECAY);
                 _isHoverVoxelSounding = true;
                 
-                const float PERCENTAGE_TO_MOVE_TOWARD = 0.90f;
-                glm::vec3 newTarget = getMouseVoxelWorldCoordinates(_hoverVoxel);
-                glm::vec3 myPosition = _myAvatar.getPosition();
                 
                 // If there is not an action tool set (add, delete, color), move to this voxel
                 if (!(Menu::getInstance()->isOptionChecked(MenuOption::VoxelAddMode) ||
                      Menu::getInstance()->isOptionChecked(MenuOption::VoxelDeleteMode) ||
                      Menu::getInstance()->isOptionChecked(MenuOption::VoxelColorMode))) {
-                    _myAvatar.setMoveTarget(myPosition + (newTarget - myPosition) * PERCENTAGE_TO_MOVE_TOWARD);
+                    
+                    _isVoxelSelected = true;
+                    _ClickedMouseX = _mouseX;
+                    _ClickedMouseY = _mouseY;
+                    _SelectedVoxel = _hoverVoxel;
+                    
                 }
             }
             
@@ -1136,10 +1153,88 @@ void Application::mouseReleaseEvent(QMouseEvent* event) {
             checkBandwidthMeterClick();
 
             _pieMenu.mouseReleaseEvent(_mouseX, _mouseY);
+            
+            if(_isVoxelSelected)
+            {
+                _isVoxelSelected = false;
+                if((abs( _mouseX - _ClickedMouseX)  > SELECTED_VOXEL_MOUSE_TRANSLATION) ||
+                   (abs( _mouseY - _ClickedMouseY)  > SELECTED_VOXEL_MOUSE_TRANSLATION))
+                {
+                    voxelSelectionMouseUp();
+                    
+                }
+            }
         }
     }
 }
 
+void Application::voxelSelectionMouseUp()
+{
+    enum
+    {
+        QUADRANT_LEFT,
+        QUADRANT_RIGHT,
+        QUADRANT_UP,
+        QUADRANT_DOWN
+    };
+    
+    int quadrant = -1;
+    if(abs( _mouseX - _ClickedMouseX) >= abs( _mouseY - _ClickedMouseY))
+    {
+        if(_ClickedMouseX > _mouseX )
+        {
+            quadrant = QUADRANT_LEFT;
+        }
+        else
+        {
+            quadrant = QUADRANT_RIGHT;
+        }
+    }
+    else
+    {
+        if(_ClickedMouseY > _mouseY)
+        {
+            quadrant = QUADRANT_UP;
+        }
+        else
+        {
+            quadrant = QUADRANT_DOWN;
+        }
+    }
+    
+    switch (quadrant) {
+        case QUADRANT_UP:
+            
+            break;
+        case QUADRANT_DOWN:
+        {
+            const float PERCENTAGE_TO_MOVE_TOWARD = 0.90f;
+            glm::vec3 newTarget = getMouseVoxelWorldCoordinates(_SelectedVoxel);
+            glm::vec3 myPosition = _myAvatar.getPosition();
+            
+            _myAvatar.setMoveTarget(myPosition + (newTarget - myPosition) * PERCENTAGE_TO_MOVE_TOWARD);
+        }
+        break;
+        case QUADRANT_LEFT:
+            voxelSelectionBeginPlaceNewVoxel();
+            
+            break;
+        case QUADRANT_RIGHT:
+            deleteVoxel(_SelectedVoxel);
+            break;
+            
+        default:
+            break;
+    }
+    
+}
+
+void Application::voxelSelectionBeginPlaceNewVoxel()
+{
+     
+     
+}
+     
 void Application::touchUpdateEvent(QTouchEvent* event) {
     bool validTouch = false;
     if (activeWindow() == _window) {
@@ -3708,17 +3803,25 @@ bool Application::maybeEditVoxelUnderCursor() {
 }
 
 void Application::deleteVoxelUnderCursor() {
-    if (_mouseVoxel.s != 0) {
+    
+    deleteVoxel(_mouseVoxel);
+    // remember the position for drag detection
+    _justEditedVoxel = true;
+}
+
+void Application::deleteVoxel(VoxelDetail & voxel)
+{
+    if (voxel.s != 0) {
         // sending delete to the server is sufficient, server will send new version so we see updates soon enough
-        _voxelEditSender.sendVoxelEditMessage(PACKET_TYPE_ERASE_VOXEL, _mouseVoxel);
-
+        _voxelEditSender.sendVoxelEditMessage(PACKET_TYPE_ERASE_VOXEL, voxel);
+        
         // delete it locally to see the effect immediately (and in case no voxel server is present)
-        _voxels.deleteVoxelAt(_mouseVoxel.x, _mouseVoxel.y, _mouseVoxel.z, _mouseVoxel.s);
-
+        _voxels.deleteVoxelAt(voxel.x, voxel.y, voxel.z, voxel.s);
+        
         AudioInjector* voxelInjector = AudioInjectionManager::injectorWithCapacity(5000);
         
         if (voxelInjector) {
-            voxelInjector->setPosition(glm::vec3(_mouseVoxel.x, _mouseVoxel.y, _mouseVoxel.z));
+            voxelInjector->setPosition(glm::vec3(voxel.x, voxel.y, voxel.z));
             //voxelInjector->setBearing(0); //straight down the z axis
             voxelInjector->setVolume (255); //255 is max, and also default value
             
@@ -3731,8 +3834,8 @@ void Application::deleteVoxelUnderCursor() {
             AudioInjectionManager::threadInjector(voxelInjector);
         }
     }
-    // remember the position for drag detection
-    _justEditedVoxel = true;
+    
+    
 }
 
 void Application::eyedropperVoxelUnderCursor() {

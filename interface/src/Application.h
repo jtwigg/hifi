@@ -241,6 +241,7 @@ private:
      
     bool maybeEditVoxelUnderCursor();
     void deleteVoxelUnderCursor();
+    void deleteVoxel(VoxelDetail & voxel);
     void eyedropperVoxelUnderCursor();
     void injectVoxelAddedSoundEffect();
             
@@ -254,6 +255,13 @@ private:
     void findAxisAlignment();
 
     void displayRearMirrorTools();
+    
+    //Voxel Click Selection and Manipulation
+    void voxelSelectionMouseUp();
+    void voxelSelectionMouseMove();
+    void voxelSelectionBeginPlaceNewVoxel();
+    void voxelSelectionUpdatePlaceNewVoxel();
+    void voxelSelectionPlaceNewVoxel();
 
     QMainWindow* _window;
     QGLWidget* _glWidget;
@@ -342,6 +350,15 @@ private:
     bool _isHoverVoxel;
     bool _isHoverVoxelSounding;
     nodeColor _hoverVoxelOriginalColor;
+    
+    //Voxel that was downclicked upon.
+    VoxelDetail _SelectedVoxel;
+    bool _isVoxelSelected;
+    int _ClickedMouseX;
+    int _ClickedMouseY;
+    bool _PlacingNewVoxel;
+    int  _currentSize;
+    
     
     VoxelDetail _mouseVoxel;      // details of the voxel to be edited
     float _mouseVoxelScale;       // the scale for adding/removing voxels
