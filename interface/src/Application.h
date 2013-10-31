@@ -257,11 +257,14 @@ private:
     void displayRearMirrorTools();
     
     //Voxel Click Selection and Manipulation
+    void voxelSelectionInit();
     void voxelSelectionMouseUp();
     void voxelSelectionMouseMove();
     void voxelSelectionBeginPlaceNewVoxel();
     void voxelSelectionUpdatePlaceNewVoxel();
     void voxelSelectionPlaceNewVoxel();
+    
+    eQuadrant getQuadrant(int initalMouseX, int initialMouseY, int finalMouseX, int finalMouseY);
 
 
     QMainWindow* _window;
@@ -348,17 +351,26 @@ private:
     bool _mousePressed; //  true if mouse has been pressed (clear when finished)
 
     VoxelDetail _hoverVoxel;      // Stuff about the voxel I am hovering or clicking
+    float _hoverVoxelDistance;
+    BoxFace _hoverVoxelFace;
     bool _isHoverVoxel;
     bool _isHoverVoxelSounding;
     nodeColor _hoverVoxelOriginalColor;
     
     //Voxel that was downclicked upon.
     VoxelDetail _SelectedVoxel;
+    float _SelectedVoxelDistance;
+    BoxFace _SelectedVoxelFace;
+    
+    VoxelDetail _NewVoxel;
     bool _isVoxelSelected;
     bool _isVoxelSelectedBeingModified;
     eQuadrant _quadrant;
     int _ClickedMouseX;
     int _ClickedMouseY;
+    glm::vec3 _ClickedOrigin;
+    glm::vec3 _ClickedDirection;    
+    
     bool _PlacingNewVoxel;
     int  _currentSize;
     

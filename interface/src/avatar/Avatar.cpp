@@ -442,6 +442,12 @@ void Avatar::setMouseRay(const glm::vec3 &origin, const glm::vec3 &direction) {
     _mouseRayDirection = direction;
 }
 
+void Avatar::getMouseRay(glm::vec3 &origin, glm::vec3 &direction) const
+{
+    origin = _mouseRayOrigin;
+    direction = _mouseRayDirection;
+}
+
 void Avatar::updateHandMovementAndTouching(float deltaTime, bool enableHandMovement) {
     // reset hand and arm positions according to hand movement
     enableHandMovement |= updateLeapHandPositions();

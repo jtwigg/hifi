@@ -158,6 +158,7 @@ public:
     glm::quat getWorldAlignedOrientation() const;
     AvatarVoxelSystem* getVoxels() { return &_voxels; }
 
+    void getMouseRay(glm::vec3 &origin, glm::vec3 &direction) const;
     void getSkinColors(glm::vec3& lighter, glm::vec3& darker);
 
     // Get the position/rotation of a single body ball
