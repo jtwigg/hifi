@@ -315,14 +315,14 @@ void VoxelServer::run() {
     qDebug("dumpVoxelsOnMove=%s\n", debug::valueOf(_dumpVoxelsOnMove));
     
     // should we send environments? Default is yes, but this command line suppresses sending
-    const char* DONT_SEND_ENVIRONMENTS = "--dontSendEnvironments";
-    bool dontSendEnvironments =  getCmdOption(_argc, _argv, DONT_SEND_ENVIRONMENTS);
+    const char* SEND_ENVIRONMENTS = "--sendEnvironments";
+    bool dontSendEnvironments =  !getCmdOption(_argc, _argv, SEND_ENVIRONMENTS);
     if (dontSendEnvironments) {
         qDebug("Sending environments suppressed...\n");
         _sendEnvironments = false;
     } else { 
         // should we send environments? Default is yes, but this command line suppresses sending
-        const char* MINIMAL_ENVIRONMENT = "--MinimalEnvironment";
+        const char* MINIMAL_ENVIRONMENT = "--minimalEnvironment";
         _sendMinimalEnvironment =  getCmdOption(_argc, _argv, MINIMAL_ENVIRONMENT);
         qDebug("Using Minimal Environment=%s\n", debug::valueOf(_sendMinimalEnvironment));
     }
@@ -459,6 +459,12 @@ void VoxelServer::run() {
                 
                 if (node) {
                     nodeList->updateNodeWithData(node, &senderAddress, packetData, packetLength);
+                    
+                    if (!node->getActiveSocket()) {
+                        // we don't have an active socket for this node, but they're talking to us
+                        // this means they've heard from us and can reply, let's assume public is active
+                        node->activatePublicSocket();
+                    }
                     
                     VoxelNodeData* nodeData = (VoxelNodeData*) node->getLinkedData();
                     if (nodeData && !nodeData->isVoxelSendThreadInitalized()) {

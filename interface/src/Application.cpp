@@ -89,6 +89,8 @@ const int MIRROR_VIEW_TOP_PADDING = 5;
 const int MIRROR_VIEW_LEFT_PADDING = 10;
 const int MIRROR_VIEW_WIDTH = 265;
 const int MIRROR_VIEW_HEIGHT = 215;
+const float MAX_ZOOM_DISTANCE = 0.3f;
+const float MIN_ZOOM_DISTANCE = 2.0f;
 
 void messageHandler(QtMsgType type, const QMessageLogContext& context, const QString &message) {
     fprintf(stdout, "%s", message.toLocal8Bit().constData());
@@ -214,12 +216,12 @@ Application::Application(int& argc, char** argv, timeval &startup_time) :
     // start the nodeList threads
     NodeList::getInstance()->startSilentNodeRemovalThread();
     
-    _window->setCentralWidget(_glWidget);
-    
     _networkAccessManager = new QNetworkAccessManager(this);
     QNetworkDiskCache* cache = new QNetworkDiskCache(_networkAccessManager);
     cache->setCacheDirectory("interfaceCache");
     _networkAccessManager->setCache(cache);
+    
+    _window->setCentralWidget(_glWidget);
     
     restoreSizeAndPosition();
     _window->setVisible(true);
@@ -385,7 +387,7 @@ void Application::paintGL() {
     
     } else if (_myCamera.getMode() == CAMERA_MODE_MIRROR) {
         _myCamera.setTightness(0.0f);
-        _myCamera.setDistance(0.3f);
+        _myCamera.setDistance(MAX_ZOOM_DISTANCE);
         _myCamera.setTargetPosition(_myAvatar.getHead().calculateAverageEyePosition());
         _myCamera.setTargetRotation(_myAvatar.getWorldAlignedOrientation() * glm::quat(glm::vec3(0.0f, PIf, 0.0f)));
     }
@@ -435,8 +437,15 @@ void Application::paintGL() {
         _glowEffect.render();
         
         if (Menu::getInstance()->isOptionChecked(MenuOption::Mirror)) {
-            _mirrorCamera.setDistance(0.3f);
-            _mirrorCamera.setTargetPosition(_myAvatar.getHead().calculateAverageEyePosition());
+            
+            if (_rearMirrorTools->getZoomLevel() == BODY) {
+                _mirrorCamera.setDistance(MIN_ZOOM_DISTANCE);
+                _mirrorCamera.setTargetPosition(_myAvatar.getChestJointPosition());
+            } else { // HEAD zoom level
+                _mirrorCamera.setDistance(MAX_ZOOM_DISTANCE);
+                _mirrorCamera.setTargetPosition(_myAvatar.getHead().calculateAverageEyePosition());
+            }
+            
             _mirrorCamera.setTargetRotation(_myAvatar.getWorldAlignedOrientation() * glm::quat(glm::vec3(0.0f, PIf, 0.0f)));
             _mirrorCamera.update(1.0f/_fps);
             
@@ -613,7 +622,13 @@ void Application::keyPressEvent(QKeyEvent* event) {
                 _audioScope.inputPaused = !_audioScope.inputPaused;
                 break; 
             case Qt::Key_L:
-                _displayLevels = !_displayLevels;
+                if (!isShifted && !isMeta) {
+                    _displayLevels = !_displayLevels;
+                } else if (isShifted) {
+                    Menu::getInstance()->triggerOption(MenuOption::LodTools);
+                } else if (isMeta) {
+                    Menu::getInstance()->triggerOption(MenuOption::Log);
+                }
                 break;
                 
             case Qt::Key_E:
@@ -1320,8 +1335,8 @@ void Application::terminate() {
     // close(serial_fd);
     
     LeapManager::terminate();
-    
     Menu::getInstance()->saveSettings();
+    _rearMirrorTools->saveSettings(_settings);
     _settings->sync();
 
     if (_enableNetworkThread) {
@@ -1730,7 +1745,7 @@ void Application::init() {
 
     _audio.init(_glWidget);
     
-    _rearMirrorTools = new RearMirrorTools(_glWidget, _mirrorViewRect);
+    _rearMirrorTools = new RearMirrorTools(_glWidget, _mirrorViewRect, _settings);
     connect(_rearMirrorTools, SIGNAL(closeView()), SLOT(closeMirrorView()));
     connect(_rearMirrorTools, SIGNAL(restoreView()), SLOT(restoreMirrorView()));
     connect(_rearMirrorTools, SIGNAL(shrinkView()), SLOT(shrinkMirrorView()));
@@ -2367,7 +2382,14 @@ void Application::queryVoxels() {
         return;
     }
     
+    bool wantExtraDebugging = Menu::getInstance()->isOptionChecked(MenuOption::ExtraDebugging);
+    
     // These will be the same for all servers, so we can set them up once and then reuse for each server we send to.
+    _voxelQuery.setWantLowResMoving(Menu::getInstance()->isOptionChecked(MenuOption::LowRes));
+    _voxelQuery.setWantColor(Menu::getInstance()->isOptionChecked(MenuOption::SendVoxelColors));
+    _voxelQuery.setWantDelta(Menu::getInstance()->isOptionChecked(MenuOption::DeltaSending));
+    _voxelQuery.setWantOcclusionCulling(Menu::getInstance()->isOptionChecked(MenuOption::OcclusionCulling));
+    
     _voxelQuery.setCameraPosition(_viewFrustum.getPosition());
     _voxelQuery.setCameraOrientation(_viewFrustum.getOrientation());
     _voxelQuery.setCameraFov(_viewFrustum.getFieldOfView());
@@ -2375,45 +2397,74 @@ void Application::queryVoxels() {
     _voxelQuery.setCameraNearClip(_viewFrustum.getNearClip());
     _voxelQuery.setCameraFarClip(_viewFrustum.getFarClip());
     _voxelQuery.setCameraEyeOffsetPosition(_viewFrustum.getEyeOffsetPosition());
+    _voxelQuery.setVoxelSizeScale(Menu::getInstance()->getVoxelSizeScale());
+    _voxelQuery.setBoundaryLevelAdjust(Menu::getInstance()->getBoundaryLevelAdjust());
 
     unsigned char voxelQueryPacket[MAX_PACKET_SIZE];
 
     NodeList* nodeList = NodeList::getInstance();
 
     // Iterate all of the nodes, and get a count of how many voxel servers we have...
-    int voxelServerCount = 0;
+    int totalServers = 0;
+    int inViewServers = 0;
+    int unknownJurisdictionServers = 0;
+    
     for (NodeList::iterator node = nodeList->begin(); node != nodeList->end(); node++) {
         // only send to the NodeTypes that are NODE_TYPE_VOXEL_SERVER
         if (node->getActiveSocket() != NULL && node->getType() == NODE_TYPE_VOXEL_SERVER) {
+            totalServers++;
 
             // get the server bounds for this server
             QUuid nodeUUID = node->getUUID();
-            const JurisdictionMap& map = (_voxelServerJurisdictions)[nodeUUID];
-
-            unsigned char* rootCode = map.getRootOctalCode();
             
-            if (rootCode) {
-                VoxelPositionSize rootDetails;
-                voxelDetailsForCode(rootCode, rootDetails);
-                AABox serverBounds(glm::vec3(rootDetails.x, rootDetails.y, rootDetails.z), rootDetails.s);
-                serverBounds.scale(TREE_SCALE);
+            // if we haven't heard from this voxel server, go ahead and send it a query, so we
+            // can get the jurisdiction...
+            if (_voxelServerJurisdictions.find(nodeUUID) == _voxelServerJurisdictions.end()) {
+                unknownJurisdictionServers++;
+            } else {
+                const JurisdictionMap& map = (_voxelServerJurisdictions)[nodeUUID];
 
-                ViewFrustum::location serverFrustumLocation = _viewFrustum.boxInFrustum(serverBounds);
+                unsigned char* rootCode = map.getRootOctalCode();
+            
+                if (rootCode) {
+                    VoxelPositionSize rootDetails;
+                    voxelDetailsForCode(rootCode, rootDetails);
+                    AABox serverBounds(glm::vec3(rootDetails.x, rootDetails.y, rootDetails.z), rootDetails.s);
+                    serverBounds.scale(TREE_SCALE);
 
-                if (serverFrustumLocation != ViewFrustum::OUTSIDE) {
-                    voxelServerCount++;
+                    ViewFrustum::location serverFrustumLocation = _viewFrustum.boxInFrustum(serverBounds);
+
+                    if (serverFrustumLocation != ViewFrustum::OUTSIDE) {
+                        inViewServers++;
+                    }
                 }
             }
         }
     }
+    
+    if (wantExtraDebugging && unknownJurisdictionServers > 0) {
+        qDebug("Servers: total %d, in view %d, unknown jurisdiction %d \n", 
+            totalServers, inViewServers, unknownJurisdictionServers);
+    }
 
-    // assume there's at least one voxel server
-    if (voxelServerCount < 1) {
-        voxelServerCount = 1;
+    int perServerPPS = 0;
+    const int SMALL_BUDGET = 10;
+    int perUnknownServer = SMALL_BUDGET;
+
+    // determine PPS based on number of servers
+    if (inViewServers >= 1) {
+        // set our preferred PPS to be exactly evenly divided among all of the voxel servers... and allocate 1 PPS
+        // for each unknown jurisdiction server
+        perServerPPS = (DEFAULT_MAX_VOXEL_PPS / inViewServers) - (unknownJurisdictionServers * perUnknownServer);
+    } else {
+        if (unknownJurisdictionServers > 0) {
+            perUnknownServer = (DEFAULT_MAX_VOXEL_PPS / unknownJurisdictionServers);
+        }
     }
     
-    // set our preferred PPS to be exactly evenly divided among all of the voxel servers...
-    int perServerPPS = DEFAULT_MAX_VOXEL_PPS/voxelServerCount;
+    if (wantExtraDebugging && unknownJurisdictionServers > 0) {
+        qDebug("perServerPPS: %d perUnknownServer: %d\n", perServerPPS, perUnknownServer);
+    }
     
     UDPSocket* nodeSocket = NodeList::getInstance()->getNodeSocket();
     for (NodeList::iterator node = nodeList->begin(); node != nodeList->end(); node++) {
@@ -2423,44 +2474,88 @@ void Application::queryVoxels() {
 
             // get the server bounds for this server
             QUuid nodeUUID = node->getUUID();
-            const JurisdictionMap& map = (_voxelServerJurisdictions)[nodeUUID];
 
-            unsigned char* rootCode = map.getRootOctalCode();
+            bool inView = false;
+            bool unknownView = false;
             
-            if (rootCode) {
-                VoxelPositionSize rootDetails;
-                voxelDetailsForCode(rootCode, rootDetails);
-                AABox serverBounds(glm::vec3(rootDetails.x, rootDetails.y, rootDetails.z), rootDetails.s);
-                serverBounds.scale(TREE_SCALE);
-
-                ViewFrustum::location serverFrustumLocation = _viewFrustum.boxInFrustum(serverBounds);
-            
-                if (serverFrustumLocation != ViewFrustum::OUTSIDE) {
-                    //printf("_voxelQuery.setMaxVoxelPacketsPerSecond(perServerPPS=%d)\n",perServerPPS);
-                    _voxelQuery.setMaxVoxelPacketsPerSecond(perServerPPS);
-                } else {
-                    //printf("_voxelQuery.setMaxVoxelPacketsPerSecond(0)\n");
-                    _voxelQuery.setMaxVoxelPacketsPerSecond(0);
+            // if we haven't heard from this voxel server, go ahead and send it a query, so we
+            // can get the jurisdiction...
+            if (_voxelServerJurisdictions.find(nodeUUID) == _voxelServerJurisdictions.end()) {
+                unknownView = true; // assume it's in view
+                if (wantExtraDebugging) {
+                    qDebug() << "no known jurisdiction for node " << *node << ", assume it's visible.\n";
                 }
-                // set up the packet for sending...
-                unsigned char* endOfVoxelQueryPacket = voxelQueryPacket;
+            } else {
+                const JurisdictionMap& map = (_voxelServerJurisdictions)[nodeUUID];
 
-                // insert packet type/version and node UUID
-                endOfVoxelQueryPacket += populateTypeAndVersion(endOfVoxelQueryPacket, PACKET_TYPE_VOXEL_QUERY);
-                QByteArray ownerUUID = nodeList->getOwnerUUID().toRfc4122();
-                memcpy(endOfVoxelQueryPacket, ownerUUID.constData(), ownerUUID.size());
-                endOfVoxelQueryPacket += ownerUUID.size();
+                unsigned char* rootCode = map.getRootOctalCode();
+            
+                if (rootCode) {
+                    VoxelPositionSize rootDetails;
+                    voxelDetailsForCode(rootCode, rootDetails);
+                    AABox serverBounds(glm::vec3(rootDetails.x, rootDetails.y, rootDetails.z), rootDetails.s);
+                    serverBounds.scale(TREE_SCALE);
 
-                // encode the query data...
-                endOfVoxelQueryPacket += _voxelQuery.getBroadcastData(endOfVoxelQueryPacket);
-        
-                int packetLength = endOfVoxelQueryPacket - voxelQueryPacket;
-
-                nodeSocket->send(node->getActiveSocket(), voxelQueryPacket, packetLength);
-
-                // Feed number of bytes to corresponding channel of the bandwidth meter
-                _bandwidthMeter.outputStream(BandwidthMeter::VOXELS).updateValue(packetLength);
+                    ViewFrustum::location serverFrustumLocation = _viewFrustum.boxInFrustum(serverBounds);
+                    if (serverFrustumLocation != ViewFrustum::OUTSIDE) {
+                        inView = true;
+                    } else {
+                        inView = false;
+                    }
+                } else {
+                    if (wantExtraDebugging) {
+                        qDebug() << "Jurisdiction without RootCode for node " << *node << ". That's unusual!\n";
+                    }
+                }
             }
+            
+            if (inView) {
+                _voxelQuery.setMaxVoxelPacketsPerSecond(perServerPPS);
+            } else if (unknownView) {
+                if (wantExtraDebugging) {
+                    qDebug() << "no known jurisdiction for node " << *node << ", give it budget of " 
+                            << perUnknownServer << " to send us jurisdiction.\n";
+                }
+                
+                // set the query's position/orientation to be degenerate in a manner that will get the scene quickly
+                // If there's only one server, then don't do this, and just let the normal voxel query pass through 
+                // as expected... this way, we will actually get a valid scene if there is one to be seen
+                if (totalServers > 1) {
+                    _voxelQuery.setCameraPosition(glm::vec3(-0.1,-0.1,-0.1));
+                    const glm::quat OFF_IN_NEGATIVE_SPACE = glm::quat(-0.5, 0, -0.5, 1.0);
+                    _voxelQuery.setCameraOrientation(OFF_IN_NEGATIVE_SPACE);
+                    _voxelQuery.setCameraNearClip(0.1);
+                    _voxelQuery.setCameraFarClip(0.1);
+                    if (wantExtraDebugging) {
+                        qDebug() << "Using 'minimal' camera position for node " << *node << "\n";
+                    }
+                } else {
+                    if (wantExtraDebugging) {
+                        qDebug() << "Using regular camera position for node " << *node << "\n";
+                    }
+                }
+                _voxelQuery.setMaxVoxelPacketsPerSecond(perUnknownServer);
+            } else {
+                _voxelQuery.setMaxVoxelPacketsPerSecond(0);
+            }
+            // set up the packet for sending...
+            unsigned char* endOfVoxelQueryPacket = voxelQueryPacket;
+
+            // insert packet type/version and node UUID
+            endOfVoxelQueryPacket += populateTypeAndVersion(endOfVoxelQueryPacket, PACKET_TYPE_VOXEL_QUERY);
+            QByteArray ownerUUID = nodeList->getOwnerUUID().toRfc4122();
+            memcpy(endOfVoxelQueryPacket, ownerUUID.constData(), ownerUUID.size());
+            endOfVoxelQueryPacket += ownerUUID.size();
+
+            // encode the query data...
+            endOfVoxelQueryPacket += _voxelQuery.getBroadcastData(endOfVoxelQueryPacket);
+    
+            int packetLength = endOfVoxelQueryPacket - voxelQueryPacket;
+
+            nodeSocket->send(node->getActiveSocket(), voxelQueryPacket, packetLength);
+
+            // Feed number of bytes to corresponding channel of the bandwidth meter
+            _bandwidthMeter.outputStream(BandwidthMeter::VOXELS).updateValue(packetLength);
         }
     }
 }
@@ -2748,32 +2843,6 @@ void Application::displaySide(Camera& whichCamera, bool selfAvatarOnly) {
         // disable specular lighting for ground and voxels
         glMaterialfv(GL_FRONT, GL_SPECULAR, NO_SPECULAR_COLOR);
 
-        //draw a grid ground plane....
-        if (Menu::getInstance()->isOptionChecked(MenuOption::GroundPlane)) {
-            PerformanceWarning warn(Menu::getInstance()->isOptionChecked(MenuOption::PipelineWarnings), 
-                "Application::displaySide() ... ground plane...");
-
-            // draw grass plane with fog
-            glEnable(GL_FOG);
-            glEnable(GL_NORMALIZE);        
-            const float FOG_COLOR[] = { 1.0f, 1.0f, 1.0f, 1.0f };
-            glFogfv(GL_FOG_COLOR, FOG_COLOR);
-            glFogi(GL_FOG_MODE, GL_EXP2);
-            glFogf(GL_FOG_DENSITY, 0.025f);
-            glPushMatrix();
-                const float GRASS_PLANE_SIZE = 256.0f;
-                glTranslatef(-GRASS_PLANE_SIZE * 0.5f, -0.01f, GRASS_PLANE_SIZE * 0.5f);
-                glScalef(GRASS_PLANE_SIZE, 1.0f, GRASS_PLANE_SIZE);
-                glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
-                glColor3ub(70, 134, 74);
-                const int GRASS_DIVISIONS = 40;
-                _geometryCache.renderSquare(GRASS_DIVISIONS, GRASS_DIVISIONS);
-            glPopMatrix();
-            glDisable(GL_FOG);
-            glDisable(GL_NORMALIZE);
-        
-            //renderGroundPlaneGrid(EDGE_SIZE_GROUND_PLANE, _audio.getCollisionSoundMagnitude());
-        }
         //  Draw Cloud Particles
         if (Menu::getInstance()->isOptionChecked(MenuOption::ParticleCloud)) {
             _cloud.render();
@@ -3205,10 +3274,12 @@ void Application::displayStats() {
  
     std::stringstream voxelStats;
     voxelStats.precision(4);
-    voxelStats << "Voxels Rendered: " << _voxels.getVoxelsRendered() / 1000.f << "K " <<
-        "Written: " << _voxels.getVoxelsWritten()/1000.f << "K " <<
-        "Updated: " << _voxels.getVoxelsUpdated()/1000.f << "K " <<
-        "Max: " << _voxels.getMaxVoxels()/1000.f << "K ";
+    voxelStats << "Voxels " << 
+        "Max: " << _voxels.getMaxVoxels() / 1000.f << "K " << 
+        "Rendered: " << _voxels.getVoxelsRendered() / 1000.f << "K " <<
+        "Written: " << _voxels.getVoxelsWritten() / 1000.f << "K " <<
+        "Abandoned: " << _voxels.getAbandonedVoxels() / 1000.f << "K " <<
+        "Updated: " << _voxels.getVoxelsUpdated() / 1000.f << "K ";
     statsVerticalOffset += PELS_PER_LINE;
     drawtext(10, statsVerticalOffset, 0.10f, 0, 1.0, 0, (char*)voxelStats.str().c_str());
 
