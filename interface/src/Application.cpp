@@ -143,7 +143,8 @@ Application::Application(int& argc, char** argv, timeval &startup_time) :
         _bytesPerSecond(0),
         _bytesCount(0),
         _swatch(NULL),
-        _pasteMode(false)
+        _pasteMode(false),
+        _voxelMouseAction(this)
 {
     _applicationStartupTime = startup_time;
     _window->setWindowTitle("Interface");
@@ -469,28 +470,6 @@ void Application::paintGL() {
     _frameCount++;
 }
 
-
-static glm::vec3 getFaceVector(BoxFace face) {
-    switch (face) {
-        case MIN_X_FACE:
-            return glm::vec3(-1, 0, 0);
-            
-        case MAX_X_FACE:
-            return glm::vec3(1, 0, 0);
-            
-        case MIN_Y_FACE:
-            return glm::vec3(0, -1, 0);
-            
-        case MAX_Y_FACE:
-            return glm::vec3(0, 1, 0);
-            
-        case MIN_Z_FACE:
-            return glm::vec3(0, 0, -1);
-            
-        case MAX_Z_FACE:
-            return glm::vec3(0, 0, 1);
-    }
-}
 
 void Application::resetCamerasOnResizeGL(Camera& camera, int width, int height) {
     float aspectRatio = ((float)width/(float)height); // based on screen resize
@@ -1065,10 +1044,9 @@ void Application::mouseMoveEvent(QMouseEvent* event) {
         _mouseX = event->x();
         _mouseY = event->y();
         
-        if(_isVoxelSelected)
+        if(_voxelMouseAction.isActive())
         {
-            voxelSelectionMouseMove();
-            
+            _voxelMouseAction.mouseMoveEvent(_mouseX, _mouseY);
             return;
         }
 
@@ -1087,177 +1065,9 @@ void Application::mouseMoveEvent(QMouseEvent* event) {
     }
 }
 
-const int  SELECTED_VOXEL_MOUSE_TRANSLATION = 5;
-const int  SELECTED_VOXEL_SCALER_WIDTH = 50;
-const int  SIZE_VARIANTS_OF_VOXEL = 8;
 
 
-eQuadrant Application::getQuadrant(int initalMouseX, int initialMouseY, int finalMouseX, int finalMouseY)
-{
-    
-    if(abs( finalMouseX - finalMouseY) >= abs( _mouseY - initialMouseY))
-    {
-        if(_ClickedMouseX > _mouseX )
-        {
-            return QUADRANT_LEFT;
-        }
-        else
-        {
-            return QUADRANT_RIGHT;
-        }
-    }
-    else
-    {
-        if(_ClickedMouseY > _mouseY)
-        {
-            return QUADRANT_UP;
-        }
-        else
-        {
-            return QUADRANT_DOWN;
-        }
-    }
-    
-}
 
-void Application::voxelSelectionMouseMove()
-{
-    if(_isVoxelSelected)
-    {
-        if(!_isVoxelSelectedBeingModified)
-        {
-            if((abs( _mouseX - _ClickedMouseX)  > SELECTED_VOXEL_MOUSE_TRANSLATION) ||
-               (abs( _mouseY - _ClickedMouseY)  > SELECTED_VOXEL_MOUSE_TRANSLATION))
-            {
-                
-                _quadrant = getQuadrant(_ClickedMouseX, _ClickedMouseY, _mouseX, _mouseY);
-                
-                switch (_quadrant) {
-                    case QUADRANT_LEFT:
-                    {
-                        voxelSelectionBeginPlaceNewVoxel();
-                        _isVoxelSelectedBeingModified = true;
-                        break;
-                    }
-                        
-                    default:
-                        break;
-                }
-            }
-        }
-        
-        if(_isVoxelSelectedBeingModified)
-        {
-            switch (_quadrant) {
-                case QUADRANT_LEFT:
-                {
-                    voxelSelectionUpdatePlaceNewVoxel();
-                    break;
-                }
-                    
-                default:
-                    break;
-            }
-            
-        }
-    }
-    
-}
-
-
-void Application::voxelSelectionInit()
-{
-    
-    _SelectedVoxelDistance = 0;
-    
-    _isVoxelSelected = false;
-    _isVoxelSelectedBeingModified = false;
-    _quadrant = QUADRANT_LEFT;
-    _ClickedMouseX = 0;
-    _ClickedMouseY = 0;
-    
-    _PlacingNewVoxel = false;
-    _currentSize = 1;
-
-    
-}
-
-void Application::voxelSelectionUpdatePlaceNewVoxel()
-{
-    
-    int voxelScaler = _ClickedMouseX - _mouseX - SELECTED_VOXEL_MOUSE_TRANSLATION;
- 
-    if(voxelScaler < 1)
-        voxelScaler = 1;
-    else if(voxelScaler > SELECTED_VOXEL_SCALER_WIDTH)
-        voxelScaler = SELECTED_VOXEL_SCALER_WIDTH;
-    
-    float percentage = (float)voxelScaler / (float)SELECTED_VOXEL_SCALER_WIDTH;
-    _currentSize = percentage * SIZE_VARIANTS_OF_VOXEL + 1;
-
-    float newVoxelScale = _SelectedVoxel.s * 1.0f/8.0f * (float)powf(2, _currentSize);
-    
-    //  Find the voxel we are hovering over, and respond if clicked
- 
-    _NewVoxel = _SelectedVoxel;
-                
-    // find the nearest voxel with the desired scale
-    if (newVoxelScale > _NewVoxel.s) {
-        // choose the larger voxel that encompasses the one selected
-        _NewVoxel.x = newVoxelScale * floorf(_NewVoxel.x / newVoxelScale);
-        _NewVoxel.y = newVoxelScale * floorf(_NewVoxel.y / newVoxelScale);
-        _NewVoxel.z = newVoxelScale * floorf(_NewVoxel.z / newVoxelScale);
-        _NewVoxel.s = newVoxelScale;
-        
-    }
-    else
-    {
-        glm::vec3 faceVector = getFaceVector(_SelectedVoxelFace);
-        if (newVoxelScale < _NewVoxel.s) {
-            // find the closest contained voxel
-            glm::vec3 pt = (_ClickedOrigin + _ClickedDirection * _SelectedVoxelDistance) / (float)TREE_SCALE +
-            faceVector * (newVoxelScale * 0.5f);
-            _NewVoxel.x = newVoxelScale * floorf(pt.x / newVoxelScale);
-            _NewVoxel.y = newVoxelScale * floorf(pt.y / newVoxelScale);
-            _NewVoxel.z = newVoxelScale * floorf(pt.z / newVoxelScale);
-            _NewVoxel.s = newVoxelScale;
-        }
-        else
-        {
-            // use the face to determine the side on which to create a neighbor
-            _NewVoxel.x += faceVector.x * _NewVoxel.s;
-            _NewVoxel.y += faceVector.y * _NewVoxel.s;
-            _NewVoxel.z += faceVector.z * _NewVoxel.s;
-        }
-    }
-}
-
-
-void Application::voxelSelectionBeginPlaceNewVoxel()
-{
-    
-    _PlacingNewVoxel = true;
-    _currentSize = 1;
-    
-    
-    
-    
-}
-
-void Application::voxelSelectionPlaceNewVoxel()
-{
-    
-    _PlacingNewVoxel = false;
-    
-    
-    PACKET_TYPE message = PACKET_TYPE_SET_VOXEL_DESTRUCTIVE;
-    _voxelEditSender.sendVoxelEditMessage(message, _NewVoxel);
-    
-    _voxels.createVoxel(_NewVoxel.x, _NewVoxel.y, _NewVoxel.z, _NewVoxel.s,
-                        _NewVoxel.red, _NewVoxel.green, _NewVoxel.blue,
-                        true);
-    
-}
 
 
 const bool MAKE_SOUND_ON_VOXEL_HOVER = false;
@@ -1318,13 +1128,7 @@ void Application::mousePressEvent(QMouseEvent* event) {
                      Menu::getInstance()->isOptionChecked(MenuOption::VoxelDeleteMode) ||
                      Menu::getInstance()->isOptionChecked(MenuOption::VoxelColorMode))) {
                     
-                    _isVoxelSelected = true;
-                    _ClickedMouseX = _mouseX;
-                    _ClickedMouseY = _mouseY;
-                    _SelectedVoxel = _hoverVoxel;
-                    _SelectedVoxelDistance =  _hoverVoxelDistance;
-                    _SelectedVoxelFace =_hoverVoxelFace;
-                    _myAvatar.getMouseRay( _ClickedOrigin, _ClickedDirection);
+                    _voxelMouseAction.mousePressEvent(_mouseX, _mouseY, _hoverVoxel, _hoverVoxelDistance, _hoverVoxelFace);
                     
                 }
             }
@@ -1345,49 +1149,14 @@ void Application::mouseReleaseEvent(QMouseEvent* event) {
 
             _pieMenu.mouseReleaseEvent(_mouseX, _mouseY);
             
-            if(_isVoxelSelected)
+            if(_voxelMouseAction.isActive())
             {
-                _isVoxelSelected = false;
-                
-               voxelSelectionMouseUp();
+                _voxelMouseAction.mouseReleaseEvent();
             }
         }
     }
 }
 
-void Application::voxelSelectionMouseUp()
-{
-  
-    switch (_quadrant) {
-        case QUADRANT_UP:
-            
-            break;
-        case QUADRANT_DOWN:
-        {
-            const float PERCENTAGE_TO_MOVE_TOWARD = 0.90f;
-            glm::vec3 newTarget = getMouseVoxelWorldCoordinates(_SelectedVoxel);
-            glm::vec3 myPosition = _myAvatar.getPosition();
-            
-            _myAvatar.setMoveTarget(myPosition + (newTarget - myPosition) * PERCENTAGE_TO_MOVE_TOWARD);
-        }
-        break;
-        case QUADRANT_LEFT:
-            voxelSelectionPlaceNewVoxel();
-            
-            break;
-        case QUADRANT_RIGHT:
-            deleteVoxel(_SelectedVoxel);
-            break;
-            
-        default:
-            break;
-    }
-
-    _isVoxelSelectedBeingModified = false;
-
-
-    
-}
 
      
 void Application::touchUpdateEvent(QTouchEvent* event) {
@@ -1845,6 +1614,18 @@ void Application::deleteVoxels() {
     deleteVoxelUnderCursor();
 }
 
+void Application::moveTowardsVoxel(const VoxelDetail & voxel )
+{
+    
+    const float PERCENTAGE_TO_MOVE_TOWARD = 0.90f;
+    glm::vec3 newTarget = getMouseVoxelWorldCoordinates(voxel);
+    glm::vec3 myPosition = getAvatar()->getPosition();
+    
+    getAvatar()->setMoveTarget(myPosition + (newTarget - myPosition) * PERCENTAGE_TO_MOVE_TOWARD);
+    
+}
+
+
 void Application::initDisplay() {
     glEnable(GL_BLEND);
     glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_CONSTANT_ALPHA, GL_ONE);
@@ -1879,8 +1660,7 @@ void Application::init() {
     _glowEffect.init();
     _ambientOcclusionEffect.init();
     _voxelShader.init();
-    
-    voxelSelectionInit();
+
     
     _handControl.setScreenDimensions(_glWidget->width(), _glWidget->height());
 
@@ -2240,7 +2020,7 @@ void Application::update(float deltaTime) {
                     _mouseVoxel.s = _mouseVoxelScale;
                     
                 } else {
-                    glm::vec3 faceVector = getFaceVector(face);
+                    glm::vec3 faceVector = AABox::getFaceVector(face);
                     if (_mouseVoxelScale < _mouseVoxel.s) {
                         // find the closest contained voxel
                         glm::vec3 pt = (mouseRayOrigin + mouseRayDirection * distance) / (float)TREE_SCALE -
@@ -3011,22 +2791,9 @@ void Application::displaySide(Camera& whichCamera, bool selfAvatarOnly) {
         // restore default, white specular
         glMaterialfv(GL_FRONT, GL_SPECULAR, WHITE_SPECULAR_COLOR);
 
+        _voxelMouseAction.display();
         
-        if(_PlacingNewVoxel)
-        {
-            glDisable(GL_LIGHTING);
-            glPushMatrix();
-            glScalef(TREE_SCALE, TREE_SCALE, TREE_SCALE);
-            glTranslatef(_NewVoxel.x + _NewVoxel.s*0.5f,
-                         _NewVoxel.y + _NewVoxel.s*0.5f,
-                         _NewVoxel.z + _NewVoxel.s*0.5f);
-            glLineWidth(4.0f);
-            glutWireCube(_NewVoxel.s);
-            glLineWidth(1.0f);
-            glPopMatrix();
-            glEnable(GL_LIGHTING);
-        }
-        
+               
         // indicate what we'll be adding/removing in mouse mode, if anything
         if (_mouseVoxel.s != 0 && whichCamera.getMode() != CAMERA_MODE_MIRROR) {
             PerformanceWarning warn(Menu::getInstance()->isOptionChecked(MenuOption::PipelineWarnings), 

@@ -44,6 +44,7 @@
 #include "VoxelPacketProcessor.h"
 #include "VoxelSystem.h"
 #include "VoxelImporter.h"
+#include "VoxelMouseAction.h"
 #include "avatar/Avatar.h"
 #include "avatar/MyAvatar.h"
 #include "avatar/Profile.h"
@@ -133,6 +134,8 @@ public:
     Swatch*  getSwatch() { return &_swatch; }
     QMainWindow* getWindow() { return _window; }
     VoxelSceneStats* getVoxelSceneStats() { return &_voxelSceneStats; }
+    VoxelMouseAction* getVoxelMouseAction(){ return &_voxelMouseAction;}
+    VoxelEditPacketSender *  getVoxelEditSender(){ return &_voxelEditSender;}
     
     QNetworkAccessManager* getNetworkAccessManager() { return _networkAccessManager; }
     GeometryCache* getGeometryCache() { return &_geometryCache; }
@@ -170,6 +173,9 @@ public slots:
     void pasteVoxels();
     void nudgeVoxels();
     void deleteVoxels();
+    void deleteVoxel(VoxelDetail & voxel);
+    
+    void moveTowardsVoxel(const VoxelDetail & voxel );
     
     void setRenderVoxels(bool renderVoxels);
     void doKillLocalVoxels();
@@ -241,7 +247,7 @@ private:
      
     bool maybeEditVoxelUnderCursor();
     void deleteVoxelUnderCursor();
-    void deleteVoxel(VoxelDetail & voxel);
+    
     void eyedropperVoxelUnderCursor();
     void injectVoxelAddedSoundEffect();
             
@@ -257,16 +263,7 @@ private:
     void displayRearMirrorTools();
     
     //Voxel Click Selection and Manipulation
-    void voxelSelectionInit();
-    void voxelSelectionMouseUp();
-    void voxelSelectionMouseMove();
-    void voxelSelectionBeginPlaceNewVoxel();
-    void voxelSelectionUpdatePlaceNewVoxel();
-    void voxelSelectionPlaceNewVoxel();
-    
-    eQuadrant getQuadrant(int initalMouseX, int initialMouseY, int finalMouseX, int finalMouseY);
-
-
+	
     QMainWindow* _window;
     QGLWidget* _glWidget;
     
@@ -357,23 +354,6 @@ private:
     bool _isHoverVoxelSounding;
     nodeColor _hoverVoxelOriginalColor;
     
-    //Voxel that was downclicked upon.
-    VoxelDetail _SelectedVoxel;
-    float _SelectedVoxelDistance;
-    BoxFace _SelectedVoxelFace;
-    
-    VoxelDetail _NewVoxel;
-    bool _isVoxelSelected;
-    bool _isVoxelSelectedBeingModified;
-    eQuadrant _quadrant;
-    int _ClickedMouseX;
-    int _ClickedMouseY;
-    glm::vec3 _ClickedOrigin;
-    glm::vec3 _ClickedDirection;    
-    
-    bool _PlacingNewVoxel;
-    int  _currentSize;
-    
     
     VoxelDetail _mouseVoxel;      // details of the voxel to be edited
     float _mouseVoxelScale;       // the scale for adding/removing voxels
@@ -441,6 +421,7 @@ private:
     bool _pasteMode;
 
     PieMenu _pieMenu;
+    VoxelMouseAction _voxelMouseAction;
     
     VoxelSceneStats _voxelSceneStats;
     int parseVoxelStats(unsigned char* messageData, ssize_t messageLength, sockaddr senderAddress);

@@ -37,6 +37,30 @@ void AABox::scale(float scale) {
     _scale = _scale * scale;
 }
 
+
+glm::vec3 AABox::getFaceVector(BoxFace face) {
+    switch (face) {
+        case MIN_X_FACE:
+            return glm::vec3(-1, 0, 0);
+            
+        case MAX_X_FACE:
+            return glm::vec3(1, 0, 0);
+            
+        case MIN_Y_FACE:
+            return glm::vec3(0, -1, 0);
+            
+        case MAX_Y_FACE:
+            return glm::vec3(0, 1, 0);
+            
+        case MIN_Z_FACE:
+            return glm::vec3(0, 0, -1);
+            
+        case MAX_Z_FACE:
+            return glm::vec3(0, 0, 1);
+    }
+}
+
+
 glm::vec3 AABox::getVertex(BoxVertex vertex) const {
     switch (vertex) {
         case BOTTOM_LEFT_NEAR:
